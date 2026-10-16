@@ -1,0 +1,9 @@
+﻿# 临时文件
+~$*
+*.tmp
+*.bak
+# Office 临时锁与源文档
+*.docx
+*.doc
+*.xlsx
+*.pptx

@@ -102,6 +102,31 @@
     padding: 0 5px; font-family: ui-monospace, Consolas, monospace; font-size: 10px;
   }
 
+  .presets-label { font-size: 12px; color: #a8a8c0; margin-bottom: 8px; }
+  .bodies { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .body-btn {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 10px;
+    background: #1a1a26; color: #dcdce8;
+    border: 1px solid #35354a; border-radius: 8px;
+    font-size: 12px; cursor: pointer; font-family: inherit;
+    transition: background .15s, border-color .15s, box-shadow .15s;
+  }
+  .body-btn:hover { background: #262635; border-color: #45455e; }
+  .body-btn.active {
+    background: #232336; border-color: #67e8f9;
+    box-shadow: 0 0 0 1px #67e8f9 inset, 0 0 10px rgba(103,232,249,.15);
+  }
+  .body-btn .dot {
+    width: 10px; height: 10px; border-radius: 50%; flex: none;
+    box-shadow: 0 0 6px currentColor;
+  }
+  .body-btn .name { flex: 1; text-align: left; }
+  .body-btn .gv {
+    font-family: ui-monospace, Consolas, monospace;
+    color: #6f6f88; font-size: 10px;
+  }
+
   @media (max-width: 760px) {
     #app { flex-direction: column; }
     #panel { width: 100%; border-left: none; border-top: 1px solid #2e2e3d; max-height: 46%; }
@@ -121,7 +146,7 @@
       </div>
       <div class="item">
         <span class="lb">重力</span>
-        <input type="range" id="b-grv" min="1" max="25" step="0.1" value="9.8">
+        <input type="range" id="b-grv" min="0" max="25" step="0.1" value="9.8">
         <span class="vv" id="b-grv-v">9.80</span>
       </div>
       <div class="item">
@@ -157,6 +182,28 @@
       <div class="row">
         <label>时间倍率 <b id="s-val">1.00×</b></label>
         <input type="range" id="s-spd" min="0.25" max="2" step="0.05" value="1">
+      </div>
+    </div>
+
+    <div>
+      <div class="presets-label">天体预设</div>
+      <div class="bodies">
+        <button class="body-btn" data-preset="earth">
+          <span class="dot" style="background:#4a9eff;color:#4a9eff"></span>
+          <span class="name">地球</span><span class="gv">9.80</span>
+        </button>
+        <button class="body-btn" data-preset="moon">
+          <span class="dot" style="background:#b8b8c0;color:#b8b8c0"></span>
+          <span class="name">月球</span><span class="gv">1.62</span>
+        </button>
+        <button class="body-btn" data-preset="jupiter">
+          <span class="dot" style="background:#ff9a3c;color:#ff9a3c"></span>
+          <span class="name">木星</span><span class="gv">24.79</span>
+        </button>
+        <button class="body-btn" data-preset="space">
+          <span class="dot" style="background:#0a0a14;color:#0a0a14;border:1px solid #4a5070"></span>
+          <span class="name">太空</span><span class="gv">0.00</span>
+        </button>
       </div>
     </div>
 
@@ -198,6 +245,11 @@
   var running = true, dragging = false;
   var simTime = 0;
   var trail = [];                // 仅记录 bob2 轨迹
+
+  // ---------- 过渡与持久化 ----------
+  var gTween     = null;          // { from, to, t0, dur } | null
+  var saveTimer  = null;
+  var STORAGE_KEY = 'week05_double_pendulum_v1';
 
   // ---------- 尺寸 ----------
   function resize() {
@@ -382,6 +434,8 @@
     var dt = Math.min((ts - last) / 1000, 0.1);
     last = ts;
 
+    updateTween(); // no-op; tween 由 tweenGravity 内部 setTimeout 链驱动
+
     if (running && !dragging) {
       acc += dt * speed;
       var guard = 0;
@@ -427,7 +481,118 @@
     s1.value = 90; document.getElementById('a1-val').textContent = '90°';
     s2.value = 90; document.getElementById('a2-val').textContent = '90°';
     reset();
+    scheduleSave();
   }
+
+  // ---------- 天体预设：平滑过渡 g ----------
+  var PRESETS = {
+    earth:   { g: 9.80 },
+    moon:    { g: 1.62 },
+    jupiter: { g: 24.79 },
+    space:   { g: 0.00 }
+  };
+
+  function tweenGravity(targetG, dur) {
+    // 取消进行中的过渡；新 tween 接管
+    gTween = null;
+    var tweenObj = { from: g, to: targetG };
+    gTween = tweenObj;
+    var STEPS = 28;
+    var stepMs = (dur || 0.7) * 1000 / STEPS;
+    var step = 0;
+    function tick() {
+      if (gTween !== tweenObj) return; // 被手动滑块或新 tween 取消
+      step++;
+      var k = step / STEPS;
+      var e = 1 - Math.pow(1 - k, 3); // ease-out cubic
+      g = tweenObj.from + (tweenObj.to - tweenObj.from) * e;
+      var s = document.getElementById('b-grv');
+      var l = document.getElementById('b-grv-v');
+      s.value = g; l.textContent = g.toFixed(2);
+      if (k >= 1) {
+        g = tweenObj.to; gTween = null;
+        detectActivePreset();
+      } else {
+        setTimeout(tick, stepMs);
+      }
+    }
+    setTimeout(tick, stepMs);
+  }
+
+  // rAF 解耦：tween 由 tweenGravity 内部 setTimeout 链驱动；
+  // 保留该函数为 no-op 仅为 API 兼容。
+  function updateTween() { /* no-op */ }
+
+  function setActivePreset(name) {
+    var btns = document.querySelectorAll('.body-btn');
+    for (var i = 0; i < btns.length; i++) {
+      if (btns[i].getAttribute('data-preset') === name) btns[i].classList.add('active');
+      else btns[i].classList.remove('active');
+    }
+  }
+  function clearActivePresets() {
+    var btns = document.querySelectorAll('.body-btn');
+    for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+  }
+  function detectActivePreset() {
+    var best = null, bestErr = 0.05;
+    for (var k in PRESETS) {
+      var err = Math.abs(g - PRESETS[k].g);
+      if (err < bestErr) { best = k; bestErr = err; }
+    }
+    if (best) setActivePreset(best); else clearActivePresets();
+  }
+
+  // ---------- 持久化 ----------
+  function saveState() {
+    try {
+      var data = {
+        L: L1, g: g, damp: damp, speed: speed,
+        theta1Deg: Math.round(Math.abs(theta1) * 180 / Math.PI),
+        theta2Deg: Math.round(Math.abs(theta2) * 180 / Math.PI)
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch (e) { /* 隐私模式或配额满：静默 */ }
+  }
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveState, 120);
+  }
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  function syncSliders() {
+    function set(id, valId, val, fmt) {
+      var s = document.getElementById(id), l = document.getElementById(valId);
+      s.value = val; l.textContent = fmt(val);
+    }
+    set('b-len', 'b-len-v', L1, function (n) { return n + ' px'; });
+    set('b-grv', 'b-grv-v', g,  function (n) { return n.toFixed(2); });
+    set('b-dmp', 'b-dmp-v', damp, function (n) { return n.toFixed(3); });
+    set('s-spd', 's-val',   speed, function (n) { return n.toFixed(2) + '×'; });
+    set('s-a1', 'a1-val',   Math.round(Math.abs(theta1) * 180 / Math.PI), function (n) { return n + '°'; });
+    set('s-a2', 'a2-val',   Math.round(Math.abs(theta2) * 180 / Math.PI), function (n) { return n + '°'; });
+  }
+
+  // ---------- 预设按钮事件 ----------
+  (function setupPresets() {
+    var btns = document.querySelectorAll('.body-btn');
+    for (var i = 0; i < btns.length; i++) {
+      (function (btn) {
+        var name = btn.getAttribute('data-preset');
+        btn.addEventListener('click', function () {
+          var p = PRESETS[name];
+          if (!p) return;
+        tweenGravity(p.g);
+          setActivePreset(name);
+          scheduleSave();
+        });
+      })(btns[i]);
+    }
+  })();
 
   function bindSlider(id, valId, fmt, onInput) {
     var s = document.getElementById(id), v = document.getElementById(valId);
@@ -438,15 +603,17 @@
     });
   }
 
-  bindSlider('b-len', 'b-len-v', function (n) { return n + ' px'; }, function (n) { L1 = L2 = n; });
-  bindSlider('b-grv', 'b-grv-v', function (n) { return n.toFixed(2); }, function (n) { g = n; });
-  bindSlider('b-dmp', 'b-dmp-v', function (n) { return n.toFixed(3); }, function (n) { damp = n; });
-  bindSlider('s-spd', 's-val', function (n) { return n.toFixed(2) + '×'; }, function (n) { speed = n; });
+  bindSlider('b-len', 'b-len-v', function (n) { return n + ' px'; }, function (n) { L1 = L2 = n; scheduleSave(); });
+  bindSlider('b-grv', 'b-grv-v', function (n) { return n.toFixed(2); }, function (n) {
+    g = n; gTween = null; clearActivePresets(); scheduleSave();
+  });
+  bindSlider('b-dmp', 'b-dmp-v', function (n) { return n.toFixed(3); }, function (n) { damp = n; scheduleSave(); });
+  bindSlider('s-spd', 's-val', function (n) { return n.toFixed(2) + '×'; }, function (n) { speed = n; scheduleSave(); });
   bindSlider('s-a1', 'a1-val', function (n) { return n + '°'; }, function (n) {
-    theta1 = n * Math.PI / 180; omega1 = omega2 = 0; simTime = 0; trail.length = 0;
+    theta1 = n * Math.PI / 180; omega1 = omega2 = 0; simTime = 0; trail.length = 0; scheduleSave();
   });
   bindSlider('s-a2', 'a2-val', function (n) { return n + '°'; }, function (n) {
-    theta2 = n * Math.PI / 180; omega1 = omega2 = 0; simTime = 0; trail.length = 0;
+    theta2 = n * Math.PI / 180; omega1 = omega2 = 0; simTime = 0; trail.length = 0; scheduleSave();
   });
 
   var btnPlay = document.getElementById('b-play');
@@ -524,10 +691,27 @@
     dragging = false; dragTarget = null; dragBob2Snap = null;
     cv.classList.remove('dragging');
     simTime = 0; acc = 0;
+    scheduleSave();
   });
 
   resize();
-  reset();
+  // 恢复上次会话参数（localStorage）
+  var saved = loadState();
+  if (saved) {
+    if (typeof saved.L    === 'number') L1 = L2 = saved.L;
+    if (typeof saved.g    === 'number') g   = saved.g;
+    if (typeof saved.damp === 'number') damp = saved.damp;
+    if (typeof saved.speed === 'number') speed = saved.speed;
+    if (typeof saved.theta1Deg === 'number') theta1 = saved.theta1Deg * Math.PI / 180;
+    if (typeof saved.theta2Deg === 'number') theta2 = saved.theta2Deg * Math.PI / 180;
+    omega1 = 0; omega2 = 0; simTime = 0; acc = 0;
+    syncSliders();
+  } else {
+    // 首次访问：默认初始角 90°/90°
+    theta1 = Math.PI / 2; theta2 = Math.PI / 2;
+    omega1 = 0; omega2 = 0; simTime = 0; acc = 0;
+  }
+  detectActivePreset();
   requestAnimationFrame(frame);
 })();
 </script>
