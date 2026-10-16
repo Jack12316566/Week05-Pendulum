@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>单摆模拟器 · 简谐振动</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #14141c;
+    color: #dcdce8;
+    font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    overflow: hidden;
+  }
+  #app { display: flex; height: 100%; }
+
+  #stage { flex: 1; position: relative; min-width: 0; }
+  #cv { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  #cv.dragging { cursor: grabbing; }
+
+  #panel {
+    width: 300px; flex: none;
+    background: #1f1f2b;
+    border-left: 1px solid #2e2e3d;
+    padding: 20px 18px;
+    display: flex; flex-direction: column; gap: 18px;
+    overflow-y: auto;
+  }
+  h1 { font-size: 17px; font-weight: 600; letter-spacing: .5px; color: #eef; }
+  h1 small { display: block; margin-top: 4px; font-size: 11px; font-weight: 400; color: #6f6f88; letter-spacing: 0; }
+
+  .readout {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+  .cell {
+    background: #191922; border: 1px solid #2a2a38; border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .cell .k { font-size: 10px; color: #6f6f88; letter-spacing: .5px; }
+  .cell .v {
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-size: 14px; color: #67e8f9; margin-top: 3px;
+  }
+
+  .group { display: flex; flex-direction: column; gap: 12px; }
+  .row label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12px; color: #a8a8c0; margin-bottom: 6px;
+  }
+  .row label b {
+    font-family: ui-monospace, Consolas, monospace;
+    font-weight: 500; color: #eef; font-size: 12px;
+  }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px; border-radius: 2px;
+    background: #2c2c3a; outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #67e8f9; border: none; cursor: pointer;
+    box-shadow: 0 0 8px rgba(103,232,249,.55);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #67e8f9; border: none; cursor: pointer;
+    box-shadow: 0 0 8px rgba(103,232,249,.55);
+  }
+
+  .btns { display: flex; gap: 8px; }
+  button {
+    flex: 1; padding: 9px 0;
+    background: #262633; color: #dcdce8;
+    border: 1px solid #35354a; border-radius: 8px;
+    font-size: 12px; cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #2f2f40; border-color: #45455e; }
+  button:active { background: #232331; }
+
+  .tip {
+    font-size: 11px; line-height: 1.7; color: #6f6f88;
+    border-top: 1px solid #2a2a38; padding-top: 12px;
+  }
+  .tip kbd {
+    background: #262633; border: 1px solid #35354a; border-radius: 4px;
+    padding: 0 5px; font-family: ui-monospace, Consolas, monospace; font-size: 10px;
+  }
+
+  @media (max-width: 760px) {
+    #app { flex-direction: column; }
+    #panel { width: 100%; border-left: none; border-top: 1px solid #2e2e3d; max-height: 46%; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <main id="stage"><canvas id="cv"></canvas></main>
+
+  <aside id="panel">
+    <h1>单摆模拟器<small>Pendulum · 简谐振动仿真</small></h1>
+
+    <div class="readout">
+      <div class="cell"><div class="k">摆角 θ (°)</div><div class="v" id="v-ang">0.0</div></div>
+      <div class="cell"><div class="k">角速度 ω (°/s)</div><div class="v" id="v-omg">0.0</div></div>
+      <div class="cell"><div class="k">理论周期 T (s)</div><div class="v" id="v-tth">0.00</div></div>
+      <div class="cell"><div class="k">实测周期 (s)</div><div class="v" id="v-tms">—</div></div>
+      <div class="cell"><div class="k">机械能 E (J)</div><div class="v" id="v-eng">0.000</div></div>
+      <div class="cell"><div class="k">仿真时间 (s)</div><div class="v" id="v-tim">0.0</div></div>
+    </div>
+
+    <div class="group">
+      <div class="row">
+        <label>摆长 L <b id="l-val">200 px</b></label>
+        <input type="range" id="s-len" min="80" max="340" step="1" value="200">
+      </div>
+      <div class="row">
+        <label>重力 g <b id="g-val">9.80</b></label>
+        <input type="range" id="s-grv" min="1" max="25" step="0.1" value="9.8">
+      </div>
+      <div class="row">
+        <label>初始摆角 <b id="a-val">45°</b></label>
+        <input type="range" id="s-ang" min="5" max="90" step="1" value="45">
+      </div>
+      <div class="row">
+        <label>阻尼 <b id="d-val">0.000</b></label>
+        <input type="range" id="s-dmp" min="0" max="0.5" step="0.005" value="0">
+      </div>
+      <div class="row">
+        <label>时间倍率 <b id="s-val">1.00×</b></label>
+        <input type="range" id="s-spd" min="0.25" max="2" step="0.05" value="1">
+      </div>
+    </div>
+
+    <div class="btns">
+      <button id="b-play">暂停</button>
+      <button id="b-reset">重置</button>
+      <button id="b-trail">清轨迹</button>
+    </div>
+
+    <div class="tip">
+      可直接拖动摆球设定初始角度；<kbd>空格</kbd> 暂停 / 继续，<kbd>R</kbd> 重置。<br>
+      θ″ = −(g/L)·sinθ，RK4 定步长积分（1/240 s）。
+    </div>
+  </aside>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var PPM = 100; // px per meter：把像素摆长换算为物理米
+
+  var cv  = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  var stage = document.getElementById('stage');
+
+  var W = 0, H = 0, pivotX = 0, pivotY = 0;
+
+  // ---------- 状态 ----------
+  var L = 200, g = 9.8, theta0Deg = 45, damp = 0, speed = 1;
+  var theta = theta0Deg * Math.PI / 180, omega = 0;
+  var running = true, dragging = false;
+  var simTime = 0, lastCrossT = null, tMeas = null;
+  var trail = [];
+
+  // ---------- 尺寸 ----------
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    W = stage.clientWidth; H = stage.clientHeight;
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    pivotX = W / 2;
+    pivotY = Math.max(56, H * 0.13);
+
+    var maxL = Math.max(80, Math.min(340, Math.floor(H - pivotY - 58)));
+    var sl = document.getElementById('s-len');
+    sl.max = maxL;
+    if (L > maxL) { L = maxL; sl.value = maxL; document.getElementById('l-val').textContent = L + ' px'; }
+  }
+  window.addEventListener('resize', resize);
+
+  // ---------- 物理 ----------
+  function accel(th, om) {
+    var Lm = L / PPM;
+    return -(g / Lm) * Math.sin(th) - damp * om;
+  }
+
+  function step(h) {
+    var d1t = omega,                     d1o = accel(theta, omega);
+    var d2t = omega + h * d1o / 2,       d2o = accel(theta + h * d1t / 2, omega + h * d1o / 2);
+    var d3t = omega + h * d2o / 2,       d3o = accel(theta + h * d2t / 2, omega + h * d2o / 2);
+    var d4t = omega + h * d3o,           d4o = accel(theta + h * d3t,     omega + h * d3o);
+
+    var prev = theta;
+    theta += h / 6 * (d1t + 2 * d2t + 2 * d3t + d4t);
+    omega += h / 6 * (d1o + 2 * d2o + 2 * d3o + d4o);
+    simTime += h;
+
+    if (prev * theta < 0) {                 // 过平衡位置 → 半个周期
+      if (lastCrossT !== null) tMeas = 2 * (simTime - lastCrossT);
+      lastCrossT = simTime;
+    }
+  }
+
+  function energy() {
+    var Lm = L / PPM;
+    return 0.5 * Lm * Lm * omega * omega + g * Lm * (1 - Math.cos(theta));
+  }
+
+  function theoryT() { return 2 * Math.PI * Math.sqrt((L / PPM) / g); }
+
+  // ---------- 绘制 ----------
+  function drawGrid() {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.028)';
+    ctx.lineWidth = 1;
+    var s = 40;
+    for (var x = (W / 2) % s; x < W; x += s) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (var y = 0; y < H; y += s) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.fillStyle = '#1a1a24';
+    ctx.fillRect(0, 0, W, H);
+    drawGrid();
+
+    var bx = pivotX + L * Math.sin(theta);
+    var by = pivotY + L * Math.cos(theta);
+    var R = 16;
+
+    // 摆动区间参考弧
+    ctx.save();
+    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = 'rgba(103,232,249,0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(pivotX, pivotY, L, Math.PI / 2 - theta0Deg * Math.PI / 180, Math.PI / 2 + theta0Deg * Math.PI / 180);
+    ctx.stroke();
+    ctx.restore();
+
+    // 铅垂参考线
+    ctx.save();
+    ctx.setLineDash([3, 7]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.13)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pivotX, pivotY);
+    ctx.lineTo(pivotX, pivotY + L + 26);
+    ctx.stroke();
+    ctx.restore();
+
+    // 轨迹
+    if (trail.length > 1) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      for (var i = 1; i < trail.length; i++) {
+        var a = (i / trail.length) * 0.5;
+        ctx.strokeStyle = 'rgba(103,232,249,' + a.toFixed(3) + ')';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+        ctx.lineTo(trail[i].x, trail[i].y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // 摆杆
+    ctx.save();
+    ctx.strokeStyle = 'rgba(160,175,200,0.75)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(103,232,249,0.35)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(pivotX, pivotY);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    ctx.restore();
+
+    // 夹角弧 + 标注
+    ctx.save();
+    ctx.strokeStyle = 'rgba(103,232,249,0.5)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(pivotX, pivotY, 46, Math.PI / 2, Math.PI / 2 - theta, theta > 0);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(103,232,249,0.75)';
+    ctx.font = '12px ui-monospace, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    var mid = Math.PI / 2 - theta / 2;
+    ctx.fillText((theta * 180 / Math.PI).toFixed(0) + '°',
+                 pivotX + 62 * Math.cos(mid), pivotY + 62 * Math.sin(mid));
+    ctx.restore();
+
+    // 摆球（微弱发光）
+    ctx.save();
+    ctx.shadowColor = 'rgba(103,232,249,0.85)';
+    ctx.shadowBlur = 22;
+    var grd = ctx.createRadialGradient(bx - R * 0.35, by - R * 0.4, R * 0.12, bx, by, R);
+    grd.addColorStop(0, '#ffffff');
+    grd.addColorStop(0.35, '#a8f2ff');
+    grd.addColorStop(1, '#2fa8c9');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(bx, by, R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 悬点
+    ctx.save();
+    ctx.fillStyle = '#8b93a8';
+    ctx.beginPath();
+    ctx.arc(pivotX, pivotY, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ---------- 主循环 ----------
+  var FIXED = 1 / 240, acc = 0, last = 0;
+
+  function frame(ts) {
+    if (!last) last = ts;
+    var dt = Math.min((ts - last) / 1000, 0.1);
+    last = ts;
+
+    if (running && !dragging) {
+      acc += dt * speed;
+      var guard = 0;
+      while (acc >= FIXED && guard++ < 600) { step(FIXED); acc -= FIXED; }
+
+      var bx = pivotX + L * Math.sin(theta);
+      var by = pivotY + L * Math.cos(theta);
+      var n = trail.length;
+      if (!n || Math.hypot(bx - trail[n - 1].x, by - trail[n - 1].y) > 2) {
+        trail.push({ x: bx, y: by });
+        if (trail.length > 110) trail.shift();
+      }
+    }
+
+    draw();
+    updateReadout();
+    requestAnimationFrame(frame);
+  }
+
+  var el = {
+    ang: document.getElementById('v-ang'), omg: document.getElementById('v-omg'),
+    tth: document.getElementById('v-tth'), tms: document.getElementById('v-tms'),
+    eng: document.getElementById('v-eng'), tim: document.getElementById('v-tim')
+  };
+  function updateReadout() {
+    el.ang.textContent = (theta * 180 / Math.PI).toFixed(1);
+    el.omg.textContent = (omega * 180 / Math.PI).toFixed(1);
+    el.tth.textContent = theoryT().toFixed(2);
+    el.tms.textContent = tMeas === null ? '—' : tMeas.toFixed(2);
+    el.eng.textContent = energy().toFixed(3);
+    el.tim.textContent = simTime.toFixed(1);
+  }
+
+  // ---------- 交互 ----------
+  function reset() {
+    theta = theta0Deg * Math.PI / 180;
+    omega = 0; simTime = 0; lastCrossT = null; tMeas = null; acc = 0;
+    trail.length = 0;
+  }
+
+  function bindSlider(id, valId, fmt, onChange) {
+    var s = document.getElementById(id), v = document.getElementById(valId);
+    s.addEventListener('input', function () {
+      var n = parseFloat(s.value);
+      v.textContent = fmt(n);
+      onChange(n);
+    });
+  }
+
+  bindSlider('s-len', 'l-val', function (n) { return n + ' px'; }, function (n) { L = n; });
+  bindSlider('s-grv', 'g-val', function (n) { return n.toFixed(2); }, function (n) { g = n; });
+  bindSlider('s-dmp', 'd-val', function (n) { return n.toFixed(3); }, function (n) { damp = n; });
+  bindSlider('s-spd', 's-val', function (n) { return n.toFixed(2) + '×'; }, function (n) { speed = n; });
+  bindSlider('s-ang', 'a-val', function (n) { return n + '°'; }, function (n) { theta0Deg = n; reset(); });
+
+  var btnPlay = document.getElementById('b-play');
+  btnPlay.addEventListener('click', function () {
+    running = !running;
+    btnPlay.textContent = running ? '暂停' : '继续';
+  });
+  document.getElementById('b-reset').addEventListener('click', reset);
+  document.getElementById('b-trail').addEventListener('click', function () { trail.length = 0; });
+
+  window.addEventListener('keydown', function (e) {
+    if (e.code === 'Space') { e.preventDefault(); btnPlay.click(); }
+    if (e.key === 'r' || e.key === 'R') reset();
+  });
+
+  function localPos(e) {
+    var r = cv.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    var p = localPos(e);
+    var bx = pivotX + L * Math.sin(theta), by = pivotY + L * Math.cos(theta);
+    if (Math.hypot(p.x - bx, p.y - by) > 34 &&
+        Math.hypot(p.x - pivotX, p.y - pivotY) > L + 30) return;
+    dragging = true;
+    cv.classList.add('dragging');
+    cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var p = localPos(e);
+    var dx = p.x - pivotX, dy = p.y - pivotY;
+    if (dy < 10) dy = 10;
+    theta = Math.atan2(dx, dy);
+    theta = Math.max(-Math.PI * 0.49, Math.min(Math.PI * 0.49, theta));
+    omega = 0; lastCrossT = null; tMeas = null;
+    var d = Math.max(5, Math.round(Math.abs(theta) * 180 / Math.PI));
+    theta0Deg = d;
+    document.getElementById('s-ang').value = d;
+    document.getElementById('a-val').textContent = d + '°';
+  });
+  cv.addEventListener('pointerup', function () {
+    dragging = false; cv.classList.remove('dragging');
+    simTime = 0; acc = 0;
+  });
+
+  resize();
+  reset();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
