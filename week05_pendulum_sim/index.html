@@ -15,9 +15,26 @@
   }
   #app { display: flex; height: 100%; }
 
-  #stage { flex: 1; position: relative; min-width: 0; }
+  #stage { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #canvasWrap { flex: 1; min-height: 0; position: relative; }
   #cv { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
   #cv.dragging { cursor: grabbing; }
+
+  #bar {
+    flex: none;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 13px 18px;
+    background: #1b1b26;
+    border-top: 1px solid #2e2e3d;
+  }
+  #bar .item { display: flex; align-items: center; gap: 10px; flex: 1 1 200px; min-width: 190px; }
+  #bar .item .lb { font-size: 12px; color: #a8a8c0; white-space: nowrap; }
+  #bar .item input[type=range] { flex: 1; min-width: 80px; }
+  #bar .item .vv {
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-size: 12px; color: #67e8f9; min-width: 64px; text-align: right;
+  }
+  #bar button { flex: none; padding: 9px 20px; }
 
   #panel {
     width: 300px; flex: none;
@@ -97,7 +114,28 @@
 </head>
 <body>
 <div id="app">
-  <main id="stage"><canvas id="cv"></canvas></main>
+  <main id="stage">
+    <div id="canvasWrap"><canvas id="cv"></canvas></div>
+
+    <div id="bar">
+      <div class="item">
+        <span class="lb">摆长</span>
+        <input type="range" id="b-len" min="100" max="350" step="1" value="200">
+        <span class="vv" id="b-len-v">200 px</span>
+      </div>
+      <div class="item">
+        <span class="lb">重力</span>
+        <input type="range" id="b-grv" min="1" max="25" step="0.1" value="9.8">
+        <span class="vv" id="b-grv-v">9.80</span>
+      </div>
+      <div class="item">
+        <span class="lb">阻尼</span>
+        <input type="range" id="b-dmp" min="0" max="0.01" step="0.0005" value="0.002">
+        <span class="vv" id="b-dmp-v">0.002</span>
+      </div>
+      <button id="b-reset">重置摆动</button>
+    </div>
+  </main>
 
   <aside id="panel">
     <h1>单摆模拟器<small>Pendulum · 简谐振动仿真</small></h1>
@@ -114,7 +152,7 @@
     <div class="group">
       <div class="row">
         <label>摆长 L <b id="l-val">200 px</b></label>
-        <input type="range" id="s-len" min="80" max="340" step="1" value="200">
+        <input type="range" id="s-len" min="100" max="350" step="1" value="200">
       </div>
       <div class="row">
         <label>重力 g <b id="g-val">9.80</b></label>
@@ -125,8 +163,8 @@
         <input type="range" id="s-ang" min="5" max="90" step="1" value="45">
       </div>
       <div class="row">
-        <label>阻尼 <b id="d-val">0.000</b></label>
-        <input type="range" id="s-dmp" min="0" max="0.5" step="0.005" value="0">
+        <label>阻尼 <b id="d-val">0.002</b></label>
+        <input type="range" id="s-dmp" min="0" max="0.01" step="0.0005" value="0.002">
       </div>
       <div class="row">
         <label>时间倍率 <b id="s-val">1.00×</b></label>
@@ -136,13 +174,12 @@
 
     <div class="btns">
       <button id="b-play">暂停</button>
-      <button id="b-reset">重置</button>
       <button id="b-trail">清轨迹</button>
     </div>
 
     <div class="tip">
-      可直接拖动摆球设定初始角度；<kbd>空格</kbd> 暂停 / 继续，<kbd>R</kbd> 重置。<br>
-      θ″ = −(g/L)·sinθ，RK4 定步长积分（1/240 s）。
+      可直接拖动摆球设定初始角度；<kbd>空格</kbd> 暂停 / 继续，<kbd>R</kbd> 重置摆动。<br>
+      θ″ = −(g/L)·sinθ − c·ω（c = 阻尼 × 100 s⁻¹），RK4 定步长积分（1/240 s）。
     </div>
   </aside>
 </div>
@@ -151,25 +188,29 @@
 (function () {
   'use strict';
 
-  var PPM = 100; // px per meter：把像素摆长换算为物理米
+  var PPM = 100;       // px per meter：把像素摆长换算为物理米
+  var DAMP_GAIN = 100; // 滑块阻尼 b(0~0.010) → 物理阻尼系数 c = b × 100 (s⁻¹)
 
   var cv  = document.getElementById('cv');
   var ctx = cv.getContext('2d');
-  var stage = document.getElementById('stage');
+  var wrap = document.getElementById('canvasWrap');
 
   var W = 0, H = 0, pivotX = 0, pivotY = 0;
 
   // ---------- 状态 ----------
-  var L = 200, g = 9.8, theta0Deg = 45, damp = 0, speed = 1;
+  var L = 200, g = 9.8, theta0Deg = 45, damp = 0.002, speed = 1;
   var theta = theta0Deg * Math.PI / 180, omega = 0;
   var running = true, dragging = false;
   var simTime = 0, lastCrossT = null, tMeas = null;
   var trail = [];
 
+  // 同一参数可绑定多个控件（底部控制条 + 侧栏），改动时双向同步
+  var groups = {};
+
   // ---------- 尺寸 ----------
   function resize() {
     var dpr = window.devicePixelRatio || 1;
-    W = stage.clientWidth; H = stage.clientHeight;
+    W = wrap.clientWidth; H = wrap.clientHeight;
     cv.width = Math.round(W * dpr);
     cv.height = Math.round(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -177,17 +218,17 @@
     pivotX = W / 2;
     pivotY = Math.max(56, H * 0.13);
 
-    var maxL = Math.max(80, Math.min(340, Math.floor(H - pivotY - 58)));
-    var sl = document.getElementById('s-len');
-    sl.max = maxL;
-    if (L > maxL) { L = maxL; sl.value = maxL; document.getElementById('l-val').textContent = L + ' px'; }
+    var maxL = Math.max(100, Math.min(350, Math.floor(H - pivotY - 44)));
+    var list = groups['len'] || [];
+    for (var i = 0; i < list.length; i++) list[i].input.max = maxL;
+    if (L > maxL) { L = maxL; sync('len', maxL, null); }
   }
   window.addEventListener('resize', resize);
 
   // ---------- 物理 ----------
   function accel(th, om) {
     var Lm = L / PPM;
-    return -(g / Lm) * Math.sin(th) - damp * om;
+    return -(g / Lm) * Math.sin(th) - DAMP_GAIN * damp * om;
   }
 
   function step(h) {
@@ -374,32 +415,61 @@
     trail.length = 0;
   }
 
-  function bindSlider(id, valId, fmt, onChange) {
+  // 「重置摆动」：精准回到 45° 初始状态
+  function resetTo45() {
+    theta0Deg = 45;
+    sync('ang', 45, null);
+    reset();
+  }
+
+  // 注册一个控件到参数组；同组任意控件变化都会同步其余控件
+  function reg(group, id, valId, fmt, onInput) {
     var s = document.getElementById(id), v = document.getElementById(valId);
+    var item = { input: s, label: v, fmt: fmt };
+    (groups[group] = groups[group] || []).push(item);
     s.addEventListener('input', function () {
       var n = parseFloat(s.value);
-      v.textContent = fmt(n);
-      onChange(n);
+      sync(group, n, item);
+      onInput(n);
     });
   }
 
-  bindSlider('s-len', 'l-val', function (n) { return n + ' px'; }, function (n) { L = n; });
-  bindSlider('s-grv', 'g-val', function (n) { return n.toFixed(2); }, function (n) { g = n; });
-  bindSlider('s-dmp', 'd-val', function (n) { return n.toFixed(3); }, function (n) { damp = n; });
-  bindSlider('s-spd', 's-val', function (n) { return n.toFixed(2) + '×'; }, function (n) { speed = n; });
-  bindSlider('s-ang', 'a-val', function (n) { return n + '°'; }, function (n) { theta0Deg = n; reset(); });
+  // 把值写入同组其它控件（except 为触发源，跳过以避免回写抖动）
+  function sync(group, n, except) {
+    var list = groups[group] || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] === except) continue;
+      list[i].input.value = n;
+      list[i].label.textContent = list[i].fmt(n);
+    }
+  }
+
+  var fLen = function (n) { return n + ' px'; };
+  var fGrv = function (n) { return n.toFixed(2); };
+  var fDmp = function (n) { return n.toFixed(3); };
+  var fSpd = function (n) { return n.toFixed(2) + '×'; };
+  var fAng = function (n) { return n + '°'; };
+
+  reg('len', 'b-len', 'b-len-v', fLen, function (n) { L = n; });
+  reg('len', 's-len', 'l-val',   fLen, function (n) { L = n; });
+  reg('grv', 'b-grv', 'b-grv-v', fGrv, function (n) { g = n; });
+  reg('grv', 's-grv', 'g-val',   fGrv, function (n) { g = n; });
+  reg('dmp', 'b-dmp', 'b-dmp-v', fDmp, function (n) { damp = n; });
+  reg('dmp', 's-dmp', 'd-val',   fDmp, function (n) { damp = n; });
+  reg('spd', 's-spd', 's-val',   fSpd, function (n) { speed = n; });
+  reg('ang', 's-ang', 'a-val',   fAng, function (n) { theta0Deg = n; reset(); });
 
   var btnPlay = document.getElementById('b-play');
   btnPlay.addEventListener('click', function () {
     running = !running;
     btnPlay.textContent = running ? '暂停' : '继续';
   });
-  document.getElementById('b-reset').addEventListener('click', reset);
+  document.getElementById('b-reset').addEventListener('click', resetTo45);
   document.getElementById('b-trail').addEventListener('click', function () { trail.length = 0; });
 
   window.addEventListener('keydown', function (e) {
     if (e.code === 'Space') { e.preventDefault(); btnPlay.click(); }
-    if (e.key === 'r' || e.key === 'R') reset();
+    if (e.key === 'r' || e.key === 'R') resetTo45();
   });
 
   function localPos(e) {
@@ -425,8 +495,7 @@
     omega = 0; lastCrossT = null; tMeas = null;
     var d = Math.max(5, Math.round(Math.abs(theta) * 180 / Math.PI));
     theta0Deg = d;
-    document.getElementById('s-ang').value = d;
-    document.getElementById('a-val').textContent = d + '°';
+    sync('ang', d, null);
   });
   cv.addEventListener('pointerup', function () {
     dragging = false; cv.classList.remove('dragging');
