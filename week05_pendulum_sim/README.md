@@ -7,7 +7,8 @@
 
 - 姓名：刘宇彬
 - 学号：5904126080
-- GitHub 作品集链接：[待 push 后补充，需先配置 remote 并推送]
+- GitHub 作品集链接：https://github.com/Jack12316566/Week05-Pendulum
+- 远端仓库：`Jack12316566/Week05-Pendulum`（Public，已 `git push` 同步全部提交记录）
 
 ## 无菌工作区就绪状态
 
@@ -40,7 +41,7 @@
 | 进阶挑战 B | 天体场景与 localStorage 持久化 | `bc2476e` feat(week05): add celestial body presets and localStorage persistence |
 | 交付 | 三反思、版本对比、打包说明 | `fb4fe6e`（本次） |
 
-共 **8 次**规范 Commit，满足「3 轮以上 Commit 记录」要求。
+共 **9 次**规范 Commit，满足「3 轮以上 Commit 记录」要求；已全部 `git push` 至 https://github.com/Jack12316566/Week05-Pendulum。
 
 ## 任务四排错记录（ReAct 闭环）
 
@@ -146,7 +147,7 @@
 - [x] 双击 `index.html` 能在浏览器中正常流畅运行（三个版本均通过 headless 冒烟：单摆 / 双摆 / 天体 各 0 报错）
 - [x] 按 F12 检查 Console 控制台无红色报错（`errs=0`）
 - [x] `README.md` 中完整填写「人机协同三反思」（按指导书三问逐条作答）
-- [ ] 已执行 `git push` 推送到 GitHub 个人作品集（**待配置 remote 后执行**）
+- [x] 已执行 `git push` 推送到 GitHub 个人作品集（https://github.com/Jack12316566/Week05-Pendulum，9 条 Commit 已同步可见）
 - [x] 仓库已归档打包为标准 Zip 格式（`Week05_Lab_5904126080刘宇彬.zip`，含 `.git/` 提交历史）
 
 ## 进阶挑战说明（选做 +10 分）

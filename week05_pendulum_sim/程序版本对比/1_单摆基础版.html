@@ -151,8 +151,20 @@
 
     <div class="group">
       <div class="row">
+        <label>摆长 L <b id="l-val">200 px</b></label>
+        <input type="range" id="s-len" min="100" max="350" step="1" value="200">
+      </div>
+      <div class="row">
+        <label>重力 g <b id="g-val">9.80</b></label>
+        <input type="range" id="s-grv" min="1" max="25" step="0.1" value="9.8">
+      </div>
+      <div class="row">
         <label>初始摆角 <b id="a-val">45°</b></label>
         <input type="range" id="s-ang" min="5" max="90" step="1" value="45">
+      </div>
+      <div class="row">
+        <label>阻尼 <b id="d-val">0.002</b></label>
+        <input type="range" id="s-dmp" min="0" max="0.01" step="0.0005" value="0.002">
       </div>
       <div class="row">
         <label>时间倍率 <b id="s-val">1.00×</b></label>
@@ -192,6 +204,9 @@
   var simTime = 0, lastCrossT = null, tMeas = null;
   var trail = [];
 
+  // 同一参数可绑定多个控件（底部控制条 + 侧栏），改动时双向同步
+  var groups = {};
+
   // ---------- 尺寸 ----------
   function resize() {
     var dpr = window.devicePixelRatio || 1;
@@ -204,9 +219,9 @@
     pivotY = Math.max(56, H * 0.13);
 
     var maxL = Math.max(100, Math.min(350, Math.floor(H - pivotY - 44)));
-    var sl = document.getElementById('b-len');
-    sl.max = maxL;
-    if (L > maxL) { L = maxL; sl.value = maxL; document.getElementById('b-len-v').textContent = L + ' px'; }
+    var list = groups['len'] || [];
+    for (var i = 0; i < list.length; i++) list[i].input.max = maxL;
+    if (L > maxL) { L = maxL; sync('len', maxL, null); }
   }
   window.addEventListener('resize', resize);
 
@@ -403,26 +418,46 @@
   // 「重置摆动」：精准回到 45° 初始状态
   function resetTo45() {
     theta0Deg = 45;
-    var sa = document.getElementById('s-ang');
-    sa.value = 45;
-    document.getElementById('a-val').textContent = '45°';
+    sync('ang', 45, null);
     reset();
   }
 
-  function bindSlider(id, valId, fmt, onChange) {
+  // 注册一个控件到参数组；同组任意控件变化都会同步其余控件
+  function reg(group, id, valId, fmt, onInput) {
     var s = document.getElementById(id), v = document.getElementById(valId);
+    var item = { input: s, label: v, fmt: fmt };
+    (groups[group] = groups[group] || []).push(item);
     s.addEventListener('input', function () {
       var n = parseFloat(s.value);
-      v.textContent = fmt(n);
-      onChange(n);
+      sync(group, n, item);
+      onInput(n);
     });
   }
 
-  bindSlider('b-len', 'b-len-v', function (n) { return n + ' px'; }, function (n) { L = n; });
-  bindSlider('b-grv', 'b-grv-v', function (n) { return n.toFixed(2); }, function (n) { g = n; });
-  bindSlider('b-dmp', 'b-dmp-v', function (n) { return n.toFixed(3); }, function (n) { damp = n; });
-  bindSlider('s-spd', 's-val', function (n) { return n.toFixed(2) + '×'; }, function (n) { speed = n; });
-  bindSlider('s-ang', 'a-val', function (n) { return n + '°'; }, function (n) { theta0Deg = n; reset(); });
+  // 把值写入同组其它控件（except 为触发源，跳过以避免回写抖动）
+  function sync(group, n, except) {
+    var list = groups[group] || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] === except) continue;
+      list[i].input.value = n;
+      list[i].label.textContent = list[i].fmt(n);
+    }
+  }
+
+  var fLen = function (n) { return n + ' px'; };
+  var fGrv = function (n) { return n.toFixed(2); };
+  var fDmp = function (n) { return n.toFixed(3); };
+  var fSpd = function (n) { return n.toFixed(2) + '×'; };
+  var fAng = function (n) { return n + '°'; };
+
+  reg('len', 'b-len', 'b-len-v', fLen, function (n) { L = n; });
+  reg('len', 's-len', 'l-val',   fLen, function (n) { L = n; });
+  reg('grv', 'b-grv', 'b-grv-v', fGrv, function (n) { g = n; });
+  reg('grv', 's-grv', 'g-val',   fGrv, function (n) { g = n; });
+  reg('dmp', 'b-dmp', 'b-dmp-v', fDmp, function (n) { damp = n; });
+  reg('dmp', 's-dmp', 'd-val',   fDmp, function (n) { damp = n; });
+  reg('spd', 's-spd', 's-val',   fSpd, function (n) { speed = n; });
+  reg('ang', 's-ang', 'a-val',   fAng, function (n) { theta0Deg = n; reset(); });
 
   var btnPlay = document.getElementById('b-play');
   btnPlay.addEventListener('click', function () {
@@ -460,8 +495,7 @@
     omega = 0; lastCrossT = null; tMeas = null;
     var d = Math.max(5, Math.round(Math.abs(theta) * 180 / Math.PI));
     theta0Deg = d;
-    document.getElementById('s-ang').value = d;
-    document.getElementById('a-val').textContent = d + '°';
+    sync('ang', d, null);
   });
   cv.addEventListener('pointerup', function () {
     dragging = false; cv.classList.remove('dragging');
